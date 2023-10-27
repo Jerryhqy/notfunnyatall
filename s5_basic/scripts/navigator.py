@@ -10,6 +10,7 @@ from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
 from asl_tb3_lib.math_utils import wrap_angle
 from asl_tb3_lib.tf_utils import quaternion_to_yaw
 from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
+# hahahaha
 
 class jerryNav(BaseNavigator):
     def __init__(self, node_name: str = "navigator") -> None:
@@ -34,7 +35,7 @@ class jerryNav(BaseNavigator):
 		# return the message
         return control
     
-    def compute_trajecotry_tracking_control(self, x: float, y: float, th: float, t: float, plan: TrajectoryPlan) -> T.Tuple[float, float]:
+    def compute_trajecotry_tracking_control(self, state: TurtleBotState , plan: TrajectoryPlan, t: float) -> T.Tuple[float, float]:
         """
         Inputs:
             x,y,th: Current state
@@ -42,22 +43,23 @@ class jerryNav(BaseNavigator):
         Outputs:
             V, om: Control actions
         """
-
-        dt = t - self.t_prev
-
         ########## Code starts here ##########
+        dt = t - self.t_prev
         # a note to splev function: evaluate B-spline interpolation values 
-        state_desired = plan.desired_state(t=t)
-        x_d = state_desired.x
-        y_d = state_desired.y
+        x_d = sp.interpolate.splev(t,plan.path_x_spline, der=0)
+        y_d = sp.interpolate.splev(t,plan.path_y_spline, der=0)
+        xd_d = sp.interpolate.splev(t,plan.path_x_spline, der=1)
+        yd_d = sp.interpolate.splev(t,plan.path_y_spline, der=1)
+        xdd_d = sp.interpolate.splev(t,plan.path_x_spline, der=2)
+        ydd_d = sp.interpolate.splev(t,plan.path_y_spline, der=2)
 
         # compute virtual control (PD Controller)
-        u1 = xdd_d + self.kpx * (x_d - x) + self.kdx * (xd_d - self.V_prev * np.cos(th))
-        u2 = ydd_d + self.kpx * (y_d - x) + self.kdx * (yd_d - self.V_prev * np.cos(th))
+        u1 = xdd_d + self.kpx * (x_d - state.x) + self.kdx * (xd_d - self.V_prev * np.cos(state.theta))
+        u2 = ydd_d + self.kpx * (y_d - state.x) + self.kdx * (yd_d - self.V_prev * np.cos(state.theta))
 
         # compute actual input
-        V = self.V_prev + dt * (np.cos(th) * u1 + np.sin(th) * u2)
-        om = (-np.sin(th) * u1 + np.cos(th) * u2)/self.V_prev
+        V = self.V_prev + dt * (np.cos(state.theta) * u1 + np.sin(state.theta) * u2)
+        om = (-np.sin(state.theta) * u1 + np.cos(state.theta) * u2)/self.V_prev
 
         ########## Code ends here ##########
 
@@ -72,12 +74,14 @@ class jerryNav(BaseNavigator):
         x_init = np.array([state.x, state.y])
         x_goal = np.array([goal.x, goal.y])
         # construct an astar problem
-        astar = AStar((0, 0), (horizon, horizon), x_init, x_goal, occupancy)
+        astar = AStar((state.x, 0), (horizon, horizon), x_init, x_goal, occupancy)
         # solve the problem
         if not astar.solve() or len(astar.path) < 4:  # check whether the solution exist
             print("No path found")
             return None
         else:
+            self.V_prev = 0
+            self.t_prev = 0
             # access solution path
             x = astar.path[:,0]
             y = astar.path[:,1]
