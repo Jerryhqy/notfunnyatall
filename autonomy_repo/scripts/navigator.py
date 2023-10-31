@@ -13,8 +13,8 @@ from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
 # hahahaha
 
 class jerryNav(BaseNavigator):
-    def __init__(self, node_name: str = "navigator") -> None:
-        super().__init__(node_name)
+    def __init__(self, node_name: str = "navigator"):
+        super().__init__()
         # proportional gain
         self.kpx = 2.0
         self.kpy = 2.0
@@ -23,6 +23,9 @@ class jerryNav(BaseNavigator):
         self.kdy = 2.0
         # velocity threshold
         self.V_PREV_THRES = 0.0001
+
+        self.V_prev = self.V_PREV_THRES
+        self.t_prev = 0
 
     def compute_heading_control(self, current_state:TurtleBotState, desired_state:TurtleBotState)->TurtleBotControl:
 
@@ -35,7 +38,7 @@ class jerryNav(BaseNavigator):
 		# return the message
         return control
     
-    def compute_trajecotry_tracking_control(self, state: TurtleBotState , plan: TrajectoryPlan, t: float) -> T.Tuple[float, float]:
+    def compute_trajectory_tracking_control(self, state: TurtleBotState , plan: TrajectoryPlan, t: float) -> T.Tuple[float, float]:
         """
         Inputs:
             x,y,th: Current state
@@ -55,7 +58,7 @@ class jerryNav(BaseNavigator):
 
         # compute virtual control (PD Controller)
         u1 = xdd_d + self.kpx * (x_d - state.x) + self.kdx * (xd_d - self.V_prev * np.cos(state.theta))
-        u2 = ydd_d + self.kpx * (y_d - state.x) + self.kdx * (yd_d - self.V_prev * np.cos(state.theta))
+        u2 = ydd_d + self.kpy * (y_d - state.y) + self.kdy * (yd_d - self.V_prev * np.sin(state.theta))
 
         # compute actual input
         V = self.V_prev + dt * (np.cos(state.theta) * u1 + np.sin(state.theta) * u2)
@@ -68,23 +71,27 @@ class jerryNav(BaseNavigator):
         self.V_prev = V
         self.om_prev = om
 
-        return V, om
+        control = TurtleBotControl()
+        control.v = V
+        control.omega = om
+
+        return control
     
     def compute_trajectory_plan(self, state: TurtleBotState, goal: TurtleBotState, occupancy: StochOccupancyGrid2D, resolution: float, horizon: float) -> TrajectoryPlan | None:
-        x_init = np.array([state.x, state.y])
-        x_goal = np.array([goal.x, goal.y])
+        # x_init = np.array([state.x, state.y])
+        # x_goal = np.array([goal.x, goal.y])
         # construct an astar problem
-        astar = AStar((state.x, 0), (horizon, horizon), x_init, x_goal, occupancy)
+        astar = AStar((state.x-horizon, state.y-horizon), (state.x+horizon, state.y+horizon), (state.x,state.y), (goal.x,goal.y), occupancy, resolution=resolution)
         # solve the problem
         if not astar.solve() or len(astar.path) < 4:  # check whether the solution exist
             print("No path found")
             return None
         else:
-            self.V_prev = 0
-            self.t_prev = 0
+
             # access solution path
-            x = astar.path[:,0]
-            y = astar.path[:,1]
+            path = np.asarray(astar.path)
+            x = path[:,0]
+            y = path[:,1]
             # reset class var for previous velocity and time
 
             # DUMMY 
